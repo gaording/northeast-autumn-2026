@@ -4,7 +4,7 @@
   const data = JSON.parse(document.getElementById('trip-data').textContent);
   const $ = id => document.getElementById(id);
   const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  let route = 'all';
+  let route = 'changbai';
   let toastTimer;
   const money = n => Math.round(n).toLocaleString('zh-CN');
   const range = values => `¥${money(values[0])}–${money(values[1])}`;
@@ -20,8 +20,9 @@
     const rooms = Math.ceil(p / 2);
     const rows = [
       ['住宿', `6晚 × ${rooms}间 × ¥400–700 ÷ ${p}人`, [6*rooms*400/p,6*rooms*700/p]],
-      ['包车 / 当地交通', `全队${range(r.shared)} ÷ ${p}人`, r.shared.map(v=>v/p)],
-      ['铁路 / 城际交通预留', '不包含出发城市往返东北的大交通', r.rail],
+      ['往返油费', `${r.distance[0]}–${r.distance[1]}km；8–10L/100km × 假设¥8–9/L ÷ ${p}人`, [r.distance[0]*0.64/p,r.distance[1]*0.9/p]],
+      ['过路费预留', `全车${range(r.toll)} ÷ ${p}人；未扣假日减免`,r.toll.map(v=>v/p)],
+      ['停车预留', `全车¥150–300 ÷ ${p}人`,[150/p,300/p]],
       ['门票与景区交通', '按计划预留，非官方票价', r.ticket],
       ['吃饭', '7天 × ¥100–150/人', [700,1050]]
     ];
@@ -30,8 +31,9 @@
     $('budget-table').innerHTML = rows.map(([title,note,cost])=>`<div class="budget-row"><span>${escape(title)}<small>${escape(note)}</small></span><strong>${range(cost)}</strong></div>`).join('');
   }
   function render(key, updateURL = true) {
-    route = Object.hasOwn(data,key) ? key : 'all';
+    route = Object.hasOwn(data,key) ? key : 'changbai';
     const r = data[route];
+    $('route-mileage').textContent = `自家车全程约${money(r.distance[0])}–${money(r.distance[1])}公里 · 逐日估算合计，非导航结果`;
     for (const [id, prop] of Object.entries({'route-title':'title','route-intro':'intro','route-nights':'nights','route-effort':'effort','route-buffer':'buffer'})) $(id).textContent = r[prop];
     $('route-path').innerHTML = r.path.map(p=>`<span>${escape(p)}</span>`).join('<i aria-hidden="true">→</i>');
     $('route-warnings').innerHTML = r.warnings.map(w=>`<li>${escape(w)}</li>`).join('');
@@ -51,15 +53,15 @@
     render(b.dataset.route); toast(`已切换：${data[route].name}，每日安排与预算已更新`);
   }));
   ['recommend','notice-easy'].forEach(id=>$(id).addEventListener('click',e=>{
-    e.preventDefault(); render('easy'); $('itinerary').scrollIntoView();
+    e.preventDefault(); render('changbai'); $('itinerary').scrollIntoView();
   }));
   $('people').addEventListener('change',budget);
   const checks = [...document.querySelectorAll('[data-check]')];
   function checkProgress() { $('check-progress').textContent = `已完成 ${checks.filter(c=>c.checked).length} / ${checks.length} 项`; }
   checks.forEach(c=>{
-    try { c.checked = localStorage.getItem(`northeast-2026-${c.dataset.check}`)==='true'; } catch (_) { /* private/offline mode */ }
+    try { c.checked = localStorage.getItem(`northeast-2026-selfdrive-${c.dataset.check}`)==='true'; } catch (_) { /* private/offline mode */ }
     c.addEventListener('change',()=>{
-      try { localStorage.setItem(`northeast-2026-${c.dataset.check}`,String(c.checked)); } catch (_) { toast('浏览器未允许保存，清单仅在本次打开期间有效'); }
+      try { localStorage.setItem(`northeast-2026-selfdrive-${c.dataset.check}`,String(c.checked)); } catch (_) { toast('浏览器未允许保存，清单仅在本次打开期间有效'); }
       checkProgress();
     });
   });
@@ -68,7 +70,7 @@
     if (!/^https?:$/.test(location.protocol)) { toast('当前是离线文件，请分享HTML文件或打开GitHub Pages网址'); return; }
     const url = new URL(location.href); url.searchParams.set('route',route); url.hash='';
     if (navigator.share) {
-      try { await navigator.share({title:`东北七日赏秋 · ${data[route].name}`,url:url.href}); return; }
+      try { await navigator.share({title:`北京自驾东北七日 · ${data[route].name}`,url:url.href}); return; }
       catch (e) { if (e.name==='AbortError') return; }
     }
     try { await navigator.clipboard.writeText(url.href); toast('已复制当前路线链接，可以发给朋友了'); }
