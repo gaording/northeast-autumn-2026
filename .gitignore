@@ -1,0 +1,5 @@
+.planning/
+.DS_Store
+node_modules/
+artifacts/
+__pycache__/
