@@ -1,22 +1,24 @@
-"""Sync portable HTML from public data and JS; uses Python standard library only."""
+"""Build one portable HTML from template, data, original art and JS. No dependencies."""
 import html
 import json
-import re
+import math
 from pathlib import Path
+from urllib.parse import quote
+import scenes
+ROOT=Path(__file__).resolve().parent
+E=html.escape
 
-ROOT = Path(__file__).resolve().parent
-E = html.escape
+def detail(day):
+    plan=''.join(f'<li>{E(p)}</li>' for p in day['plan'])
+    return f'''<div class="logistics"><div><b>怎么走</b>{E(day['transport'])}</div><div><b>住在哪里</b>{E(day['stay'])}</div></div><div class="story-block"><h4>当天节奏 / 不追打卡</h4><ol>{plan}</ol></div><div class="story-block"><h4>步行与留白</h4><p>{E(day['walk'])}</p></div><div class="story-block"><h4>当天怎么穿</h4><p>{E(day['clothes'])}</p></div><p class="backup"><b>天气或计划有变</b><br>{E(day['backup'])}</p><a class="text-link" href="https://map.baidu.com/search/{quote(day['mapQuery'])}" target="_blank" rel="noopener noreferrer">在地图查位置 ↗</a>'''
 
 def cards(days):
-    from urllib.parse import quote
-    result = []
+    parts=[]
+    phases={1:'ACT I / 两人一起 · 向森林出发',7:'ACT II / 10月2日 · 在长春候选分流',8:'ACT III / 你单人驾驶 · 慢慢南返'}
     for d in days:
-        target = d.get('mapQuery') or [s.strip() for s in re.split(r'[→⇄/]', d['place']) if s.strip()][-1]
-        highlights = ''.join(f'<span>{E(h)}</span>' for h in d['highlights'])
-        steps = ''.join(f'<li>{E(p)}</li>' for p in d['plan'])
-        result.append(f'''<article class="day-card {'transfer' if d['tag']=='整天转场' else ''}" id="day-{d['n']}"><div class="day-top"><div class="day-no">{d['n']:02d}</div><div class="day-date">{E(d['date'])} <span>{E(d['week'])} · {E(d['holiday'])} · {E(d['phase'])}</span></div><span class="tag">{E(d['tag'])}</span></div><h3>{E(d['title'])}</h3><p class="place">{E(d['place'])}</p><div class="highlights">{highlights}</div><div class="logistics"><p><b>怎么走</b>{E(d['transport'])}</p><p><b>住哪里</b>{E(d['stay'])}</p></div><details><summary>展开当天安排与备选 <span aria-hidden="true">＋</span></summary><ol>{steps}</ol><p class="backup"><b>如果计划有变</b><br>{E(d['backup'])}</p><a class="text-link" href="https://map.baidu.com/search/{quote(target)}" target="_blank" rel="noopener noreferrer">在百度地图查位置 ↗</a></details></article>''')
-    return ''.join(result)
-
+        if d['n'] in phases:parts.append(f'<p class="phase-label">{phases[d["n"]]}</p>')
+        parts.append(f'''<article class="day-card" id="day-{d['n']}"><div class="date-pin"><strong>{E(d['date'])}</strong><span>{E(d['week'])}</span></div><button type="button" class="chapter-open" data-day="{d['n']}" aria-haspopup="dialog" aria-controls="chapter-dialog" aria-label="打开{E(d['date'])}章节：{E(d['title'])}"><span class="chapter-image" style="--scene:var(--scene-{d['scene']})"><span class="chapter-badge">{E(d['tag'])}</span><span class="chapter-mood">{E(d['mood'])}</span></span><span class="chapter-text"><span class="chapter-kicker">CHAPTER {d['n']:02d} / {E(d['phase'])}</span><span class="chapter-title">{E(d['title'])}</span><span class="chapter-place">{E(d['place'])}</span><span class="chapter-foot"><span>约{d['km'][0]}–{d['km'][1]}km · 规划估算</span><span class="chapter-enter">进入章节 ↗</span></span></span></button><details class="chapter-details"><summary>展开文字安排 · 无脚本也可阅读</summary>{detail(d)}</details></article>''')
+    return ''.join(parts)
 def budget_rows(route, rooms=1, person='user'):
     share=sum(route['sharedDistance'])/sum(route['distance'])
     def choose(user, companion):
@@ -30,26 +32,30 @@ def budget_rows(route, rooms=1, person='user'):
         ('餐饮','你10天，对方7天；按¥100–150/人天',choose([1000,1500],[700,1050]))]
 
 def build():
-    data = json.loads((ROOT/'trip-data.json').read_text())
-    page = (ROOT/'index.html').read_text()
-    for id_, field in {'route-title':'title','route-intro':'intro','route-nights':'nights','route-effort':'effort','route-buffer':'buffer'}.items():
-        page = re.sub(r'(<(?:h3|p|span) id="'+id_+r'">).*?(</(?:h3|p|span)>)', lambda m:m[1]+E(data['changbai'][field])+m[2],page, flags=re.S)
-    page = re.sub(r'(<ul id="route-warnings">).*?(</ul>)',lambda m:m[1]+''.join('<li>'+E(w)+'</li>' for w in data['changbai']['warnings'])+m[2],page,flags=re.S)
-    page = re.sub(r'(<div class="route-path" id="route-path">).*?(</div>)',lambda m:m[1]+'<i aria-hidden="true">→</i>'.join('<span>'+E(p)+'</span>' for p in data['changbai']['path'])+m[2],page,flags=re.S)
-    page = re.sub(r'(?<=<!-- DAYS_START -->).*?(?=<!-- DAYS_END -->)',lambda _:cards(data['changbai']['days']),page,flags=re.S)
-    route = data['changbai']
-    page = re.sub(r'(<p class="small" id="route-mileage">).*?(</p>)', lambda m:m[1]+f"自家车全程约{route['distance'][0]:,}–{route['distance'][1]:,}公里 · 逐日估算合计，非导航结果"+m[2], page,flags=re.S)
-    costs = budget_rows(route)
-    import math
-    total = [math.ceil(sum(row[2][i] for row in costs)*1.15/10)*10 for i in range(2)]
-    page = re.sub(r'(<div class="budget-number" id="budget-number">).*?(</div>)',lambda m:m[1]+f'¥{total[0]:,}–{total[1]:,}'+m[2],page,flags=re.S)
-    table = ''.join(f'<div class="budget-row"><span>{E(title)}<small>{E(note)}</small></span><strong>¥{math.floor(v[0]+.5):,}–{math.floor(v[1]+.5):,}</strong></div>' for title,note,v in costs)
-    page = re.sub(r'(?<=<!-- BUDGET_START -->).*?(?=<!-- BUDGET_END -->)',lambda _:table,page,flags=re.S)
-    raw = json.dumps(data,ensure_ascii=False,indent=2).replace('<','\\u003c')
-    page = re.sub(r'(<script type="application/json" id="trip-data">).*?(</script>)',lambda m:m[1]+'\n'+raw+'\n'+m[2],page,flags=re.S)
-    js = (ROOT/'app.js').read_text().replace('</script','<\\/script')
-    page = re.sub(r'(?<=<!-- APP_START -->).*?(?=<!-- APP_END -->)',lambda _:'\n<script>\n'+js+'\n</script>\n',page,flags=re.S)
-    (ROOT/'index.html').write_text(page)
-
-if __name__ == '__main__':
-    build()
+    data=json.loads((ROOT/'trip-data.json').read_text())
+    route=data['changbai']
+    art={key:scenes.scene(key) for key in scenes.PALETTES}
+    (ROOT/'assets').mkdir(exist_ok=True)
+    for key,svg in art.items():(ROOT/'assets'/f'{key}.svg').write_text(svg)
+    css=':root{'+''.join(f'--scene-{key}:url("data:image/svg+xml,{quote(svg,safe="")}");' for key,svg in art.items())+'}\n'+(ROOT/'styles.css').read_text()
+    costs=budget_rows(route)
+    total=[math.ceil(sum(row[2][i] for row in costs)*1.15/10)*10 for i in range(2)]
+    budget=''.join(f'<div class="budget-row"><span>{E(title)}<small>{E(note)}</small></span><strong>¥{math.floor(v[0]+.5):,}–{math.floor(v[1]+.5):,}</strong></div>' for title,note,v in costs)
+    tabs=''.join(f'<button type="button" class="tab" id="tab-{key}" data-route="{key}" aria-pressed="{str(key=="changbai").lower()}" aria-controls="route-content"><span class="letter">ROUTE {i+1:02d}</span><b>{E(value["name"])}</b><small>{E(value["label"])}</small></button>' for i,(key,value) in enumerate(data.items()))
+    replacements={
+        'STYLES':css,'APP':(ROOT/'app.js').read_text().replace('</script','<\\/script'),
+        'HERO_STYLE':'--scene:var(--scene-forest)','TABS':tabs,
+        'FOREST':E(route['forest']),'ROUTE_TITLE':E(route['title']),'ROUTE_INTRO':E(route['intro']),
+        'ROUTE_PATH':'<i aria-hidden="true">→</i>'.join('<span>'+E(p)+'</span>' for p in route['path']),
+        'NIGHTS':E(route['nights']),'EFFORT':E(route['effort']),
+        'MILEAGE':f"全程约{route['distance'][0]:,}–{route['distance'][1]:,}公里 · 逐日估算合计，非实时导航",
+        'WARNINGS':''.join('<li>'+E(w)+'</li>' for w in route['warnings']),
+        'CARDS':cards(route['days']),'BUDGET_TOTAL':f'¥{total[0]:,}–{total[1]:,}',
+        'BUDGET_ROWS':budget,'SOURCES':(ROOT/'sources.html').read_text(),
+        'DATA':json.dumps(data,ensure_ascii=False,indent=2).replace('<','\\u003c'),
+        'SCENES':json.dumps(list(art))}
+    text=(ROOT/'index.template.html').read_text()
+    for key,value in replacements.items():text=text.replace('@@'+key+'@@',value)
+    assert '@@' not in text,'unresolved template token'
+    (ROOT/'index.html').write_text(text)
+if __name__=='__main__':build()
